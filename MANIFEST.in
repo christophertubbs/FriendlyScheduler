@@ -1,0 +1,3 @@
+include SPEC.md AGENTS.md STYLE.md LICENSE
+recursive-include scripts *.py *.sh
+recursive-exclude .llm *

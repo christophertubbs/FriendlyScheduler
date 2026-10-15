@@ -1,0 +1,56 @@
+name: Release build
+on:
+  release:
+    types: [published]
+permissions:
+  contents: read
+jobs:
+  tests:
+    uses: ./.github/workflows/ci.yml
+  build:
+    needs: tests
+    runs-on: ubuntu-24.04
+    # Pinned manylinux glibc 2.28 baseline (RHEL8); x86_64 only for this draft.
+    container: quay.io/pypa/manylinux_2_28_x86_64@sha256:4131ddd7acb9c6c966af02fe7e71edc51e078c2d41f475966697676430bfa2ae
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Verify tag and build source, wheel and frozen executable
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          export PATH=/opt/python/cp311-cp311/bin:$PATH
+          python -c 'import os; from pathlib import Path; exec(Path("src/fsched/__init__.py").read_text()); assert os.environ["RELEASE_TAG"] == "v" + __version__, "release tag must match package version"'
+          python -m venv /tmp/build-venv
+          export PATH=/tmp/build-venv/bin:$PATH
+          python -m pip install '.[dev]'
+          scripts/build.sh
+          mkdir -p bundle release
+          cp dist/fsched bundle/
+          cp scripts/install.py README.md LICENSE bundle/
+          tar -czf "release/fsched-${RELEASE_TAG}-linux-x86_64.tar.gz" -C bundle .
+          cp dist/*.whl dist/*.tar.gz release/
+          cd release
+          sha256sum * > SHA256SUMS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-files
+          path: release/
+          if-no-files-found: error
+  upload:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-files
+          path: release
+      - name: Attach tested artifacts to the existing release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$RELEASE_TAG" release/*
