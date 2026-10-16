@@ -94,9 +94,7 @@ class Systemd:
                 "--value",
             ]
         ).strip()
-        if not group.startswith("/") or ".." in Path(group).parts:
-            raise RuntimeError("manager did not expose a safe slice control group")
-        root: Path = Path("/sys/fs/cgroup") / group.lstrip("/")
+        root: Path = cgroup_directory(group)
         verify_limits(root, budget.cpu, budget.memory, 512)
 
     def start(self, identifier: str, cpu: float, memory: int, duration: int) -> None:
@@ -225,6 +223,21 @@ def runner_executable() -> str:
     return path
 
 
+def cgroup_directory(group: str, mount: Path = Path("/sys/fs/cgroup")) -> Path:
+    """Resolve a real unit cgroup without treating an unstarted unit as the root.
+
+    :param group: Absolute ControlGroup property returned by the user manager.
+    :param mount: Unified cgroup mount, injectable for fixture-based tests.
+    :return: Unit-specific directory below the mount; never the mount itself.
+    :raises RuntimeError: If the property is empty, relative, root or traverses upward.
+    TODO(AI-GENERATED): Review unit-path trust assumptions.
+    """
+    relative: Path = Path(group.lstrip("/"))
+    if not group.startswith("/") or not relative.parts or ".." in relative.parts:
+        raise RuntimeError("unit has no valid assigned control group; it may not be started yet")
+    return mount / relative
+
+
 def verify_limits(root: Path, cpu: float, memory: int, tasks: int) -> None:
     """Require finite kernel limits no looser than the promised allocation.
 
@@ -253,7 +266,8 @@ def verify_limits(root: Path, cpu: float, memory: int, tasks: int) -> None:
             raise ValueError("kernel limits do not match requested ceilings")
     except (OSError, ValueError, IndexError) as exc:
         raise RuntimeError(
-            "required CPU/memory/swap/PID limits are not enforced; ask your administrator "
+            f"unsupported runtime: required CPU/memory/swap/PID limits are not enforced "
+            f"in {root}: {exc}; ask your administrator "
             "to enable unified cgroup v2 and delegate cpu, memory and pids to your user"
         ) from exc
 

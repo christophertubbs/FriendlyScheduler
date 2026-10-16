@@ -77,7 +77,11 @@ def effective_resources(
     :param cgroup_root: Unified cgroup mount, injectable for tests.
     :param proc_root: Proc filesystem root, injectable for tests.
     :return: Effective CPU equivalents, memory capacity/headroom bytes, sharing.
-    :raises OSError: If critical kernel measurements are unavailable.
+    Missing controls on a group without that controller enabled impose no local
+    ceiling. Continue through its ancestors; dispatch separately verifies actual
+    enforcement in the job slice and each service before executing a command.
+
+    :raises OSError: If existing controls or required usage measurements are unreadable.
     :raises ValueError: If measurements or cgroup paths cannot be trusted.
     TODO(AI-GENERATED): Verify cgroup namespace visibility on supported hosts.
     """
@@ -104,11 +108,14 @@ def effective_resources(
     while True:
         for filename in ("memory.max", "cpu.max"):
             path: Path = current / filename
-            if not path.exists():
-                if current != cgroup_root:
-                    raise ValueError(f"required controller file missing: {path}")
+            try:
+                values: list[str] = path.read_text().split()
+            except FileNotFoundError:
+                if not current.is_dir():
+                    raise ValueError(
+                        f"cgroup disappeared during capacity measurement: {current}"
+                    ) from None
                 continue
-            values: list[str] = path.read_text().split()
             if filename == "memory.max" and values[0] != "max":
                 ceiling: int = int(values[0])
                 usage: int = int((current / "memory.current").read_text())

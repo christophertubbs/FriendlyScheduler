@@ -177,7 +177,10 @@ job exit status is reported by `inspect`, not the original submission exit code.
 
 The scheduler reads CPU affinity, host memory availability, and all visible cgroup
 ancestor CPU/memory ceilings and memory usage. A constrained parent takes precedence
-over host totals. Hidden ancestry or missing critical measurements stop admission.
+over host totals. Hidden ancestry or unreadable critical measurements stop admission. Controller
+files can be absent in unconstrained descendants or at the real cgroup root; the
+probe keeps walking to apply every existing ancestor ceiling. Actual job and slice
+enforcement still requires all configured controller files before execution.
 
 Recent sharing is estimated from bounded, C-locale `last --since -14days -w -R`
 records. It counts distinct usernames, excluding the calling user, names ending in
@@ -286,14 +289,23 @@ and installer preservation. The live suite is deliberately opt-in:
 
 ```sh
 # Disposable host only, with installed/started worker and controller delegation.
+python scripts/check_systemd.py --required
 fsched doctor
 FSCHED_SYSTEMD_TESTS=1 pytest -m systemd -v
 ```
 
 It executes capped jobs and checks literal output, actual kernel controller files,
 runtime expiry, descendant termination, and cancellation. PR CI runs Python 3.9,
-3.11 and 3.13 plus live Ubuntu systemd integration. Release publication reuses that
-suite before building/uploading assets. This is not a substitute for a RHEL8 test
+3.11 and 3.13. Its Ubuntu integration job first creates an isolated temporary user
+slice/service with CPU, memory, swap and PID ceilings and verifies both sets of
+kernel controls. Unsupported delegation reports an explicit **SKIPPED** summary
+and does not run the live suite; a successful preflight keeps subsequent worker,
+doctor and test failures fatal. Missing root `cpu.max` alone is not a skip reason.
+The preflight removes its unique temporary units and does not modify production
+scheduler units. Its exit statuses are 0 (supported), 77 (unsupported), or 1 for
+unsupported with `--required`; unexpected errors fail rather than becoming skips.
+Release publication reuses that suite before building/uploading assets; a skipped
+integration step remains an unvalidated capability, not evidence of live readiness. This is not a substitute for a RHEL8 test
 matrix: confirm logout survival, enforcement, reboot behavior, SELinux policy and
 site-specific delegation on a disposable RHEL8 host before production deployment.
 No repository settings are changed by these workflows.

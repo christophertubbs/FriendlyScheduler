@@ -79,8 +79,12 @@ without explicit administrator action.
 
 Probe online CPUs/affinity, host MemAvailable, and finite ancestor cgroup CPU,
 memory, and PID limits. Account for tighter parent limits and current usage; host
-totals alone are insufficient. Do not parse localized human-readable tool output
-when kernel interfaces provide numeric values.
+totals alone are insufficient. A control file absent from an unconstrained group
+or the cgroup root is not itself a measurement failure: continue to every visible
+ancestor and apply its existing ceilings. Unreadable existing controls and missing
+usage for a finite memory limit remain fatal. Independently require concrete kernel
+limits on the actual job slice and service before dispatch/exec. Do not parse
+localized human-readable tool output when kernel interfaces provide numeric values.
 
 Estimate recent sharing from `last --since -14days -w`, parsing username records
 and excluding reboot/shutdown/wtmp/btmp markers, the invoking user, and names
@@ -199,9 +203,13 @@ and `STYLE.md`. Generated Python retains their requested human-review markers.
 - Local automated checks exercise the pure policy, private SQLite state, concurrent
   submissions, cancellation, startup ambiguity, terminal cleanup retry, fixed runner,
   CLI boundaries, installer preservation and malformed kernel limits.
-- Live systemd integration is opt-in and runs in PR CI on Ubuntu. It is skipped in
-  this cloud instance, which has no user bus. CI configuration has not been executed
-  here by GitHub Actions, so its results must be checked on the PR.
+- Live systemd integration is opt-in. PR CI on Ubuntu verifies delegated enforcement
+  on isolated temporary slice/service cgroups before installing the worker. Only
+  unsupported infrastructure yields an explicit skipped summary; application failures
+  after a successful probe remain fatal. Root limit-file absence alone never skips
+  the suite. The script's `--required` mode makes unavailable capability a failure
+  for target-host certification. This cloud instance has no user bus, so its live
+  suite is skipped and the updated workflow must be checked on GitHub Actions.
 - RHEL8 cgroup delegation, real logout/reboot survival, SELinux behavior, RHEL9 and
   Bazzite remain external validation tasks. A frozen build from the current cloud
   host is a local smoke artifact, not a RHEL8-compatible release. Release CI uses

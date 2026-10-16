@@ -15,7 +15,7 @@ from fsched.models import Budget, Resources
 from fsched.paths import Paths
 from fsched.policy import budget_for
 from fsched.probes import effective_resources, sharing_count
-from fsched.systemd import Systemd
+from fsched.systemd import Systemd, cgroup_directory
 
 Diagnostic = dict[str, Union[str, bool, int, float]]
 
@@ -92,7 +92,7 @@ def diagnose(manager: Systemd, locations: Paths) -> list[Diagnostic]:
                 "--value",
             ]
         ).strip()
-        root: Path = Path("/sys/fs/cgroup") / group.lstrip("/")
+        root: Path = cgroup_directory(group)
         limits: dict[str, str] = {
             name: (root / name).read_text().strip()
             for name in ("cpu.max", "memory.max", "memory.swap.max", "pids.max")
