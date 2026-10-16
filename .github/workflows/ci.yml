@@ -52,7 +52,21 @@ jobs:
           sudo systemctl restart "user@$(id -u).service"
           echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"
       - run: python -m venv .venv && .venv/bin/python -m pip install '.[dev]'
+      - name: Check actual user cgroup enforcement
+        id: cgroups
+        run: |
+          if .venv/bin/python scripts/check_systemd.py; then
+            echo "supported=true" >> "$GITHUB_OUTPUT"
+          else
+            status=$?
+            if [ "$status" -ne 77 ]; then exit "$status"; fi
+            echo "supported=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Live systemd tests skipped: delegated enforcement is unavailable"
+            echo "### Live systemd tests: SKIPPED" >> "$GITHUB_STEP_SUMMARY"
+            echo "The isolated user-slice/service probe could not verify enforcement. This run does not validate live scheduling." >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Install and run real protected jobs
+        if: steps.cgroups.outputs.supported == 'true'
         run: |
           scripts/install.sh --bin-dir "$HOME/bin"
           export PATH="$HOME/bin:$PATH"
@@ -63,11 +77,12 @@ jobs:
           done
           fsched doctor
           FSCHED_SYSTEMD_TESTS=1 .venv/bin/pytest -m systemd -v
+          echo "### Live systemd tests: PASSED" >> "$GITHUB_STEP_SUMMARY"
       - name: Diagnostics
         if: failure()
         run: |
           systemctl --user status fsched.service fsched.slice --no-pager || true
           journalctl --user -u fsched.service -n 100 --no-pager || true
       - name: Stop this workflow's worker
-        if: always()
+        if: always() && steps.cgroups.outputs.supported == 'true'
         run: systemctl --user disable --now fsched.service || true

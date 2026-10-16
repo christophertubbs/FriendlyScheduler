@@ -123,3 +123,62 @@ def test_unsafe_state_paths(tmp_path: Path) -> None:
     os.link(target / "file", target / "hardlink")
     with pytest.raises(ValueError):
         secure_file(target / "hardlink")
+
+
+def test_disabled_child_controllers_preserve_ancestor_limits(tmp_path: Path) -> None:
+    """Unenabled worker controls do not hide finite parent resource constraints.
+
+    :param tmp_path: Synthetic unified cgroup and proc filesystems.
+    :return: None; asserts parent CPU and memory ceilings despite missing leaf controls.
+    TODO(AI-GENERATED): Review cgroup lazy-controller activation regression coverage.
+    """
+    proc: Path = tmp_path / "proc"
+    root: Path = tmp_path / "cgroup"
+    parent: Path = root / "user.slice"
+    worker: Path = parent / "app.slice/fsched.service"
+    (proc / "self").mkdir(parents=True)
+    worker.mkdir(parents=True)
+    (proc / "meminfo").write_text("MemTotal: 16777216 kB\nMemAvailable: 10485760 kB\n")
+    (proc / "self/cgroup").write_text("0::/user.slice/app.slice/fsched.service\n")
+    # Root limit files and app.slice/worker controls intentionally do not exist.
+    (parent / "cpu.max").write_text("25000 100000")
+    (parent / "memory.max").write_text(str(2 * GIB))
+    (parent / "memory.current").write_text(str(GIB))
+    measured: Resources = effective_resources(1, root, proc)
+    assert measured.cpu == 0.25
+    assert measured.memory == 2 * GIB
+    assert measured.available == GIB
+    # Missing usage on a finite ancestor is not equivalent to a disabled control.
+    (parent / "memory.current").unlink()
+    with pytest.raises(FileNotFoundError):
+        effective_resources(1, root, proc)
+
+
+def test_unreadable_controller_not_silently_ignored(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Permission errors remain fatal rather than looking like unlimited capacity.
+
+    :param tmp_path: Synthetic proc/cgroup tree.
+    :param monkeypatch: Inject an unreadable CPU controller without relying on UID mode checks.
+    :return: None; asserts permission failure propagates.
+    TODO(AI-GENERATED): Review measurement failure safety.
+    """
+    from unittest.mock import MagicMock
+
+    root: Path = tmp_path / "cgroup"
+    proc: Path = tmp_path / "proc"
+    root.mkdir()
+    (proc / "self").mkdir(parents=True)
+    reader: MagicMock = MagicMock(
+        side_effect=[
+            "MemTotal: 16777216 kB\nMemAvailable: 10485760 kB\n",
+            "0::/\n",
+            "max",
+            PermissionError("cannot read cpu.max"),
+        ]
+    )
+    monkeypatch.setattr(Path, "read_text", reader)
+    with pytest.raises(PermissionError, match="cpu.max"):
+        effective_resources(1, root, proc)

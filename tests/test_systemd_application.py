@@ -331,3 +331,44 @@ def test_internal_runner_refuses_unconfined_execution(store: Store, submission: 
     store.claim(identifier)
     with pytest.raises(RuntimeError, match="constrained systemd"):
         execute_job(store, identifier)
+
+
+@pytest.mark.parametrize("group", ["", "/", "//", "/.", "relative", "/../hidden"])
+def test_unassigned_unit_is_not_cgroup_root(group: str, tmp_path: Path) -> None:
+    """Empty or invalid unit properties cannot be mistaken for root cgroup limits.
+
+    :param group: Invalid systemd ControlGroup property.
+    :param tmp_path: Synthetic unified mount.
+    :return: None; asserts a clear pending/invalid-unit diagnostic.
+    TODO(AI-GENERATED): Review empty-slice doctor regression.
+    """
+    from fsched.systemd import cgroup_directory
+
+    with pytest.raises(RuntimeError, match="no valid assigned control group"):
+        cgroup_directory(group, tmp_path)
+
+
+def test_doctor_unstarted_slice_diagnostic(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Doctor reports an unstarted slice rather than nonexistent root cpu.max.
+
+    :param tmp_path: Temporary unit/state locations.
+    :param monkeypatch: Scope fake platform adapters.
+    :return: None; asserts the failure explains the empty group instead of reading root controls.
+    TODO(AI-GENERATED): Review asynchronous startup diagnostic clarity.
+    """
+    from fsched.doctor import Diagnostic, diagnose
+    from fsched.models import Resources
+    from fsched.paths import Paths
+
+    command: MagicMock = MagicMock(side_effect=["", "yes", "active", ""])
+    monkeypatch.setattr(Systemd, "command", command)
+    monkeypatch.setattr("fsched.doctor.sharing_count", MagicMock(return_value=1))
+    monkeypatch.setattr(
+        "fsched.doctor.effective_resources",
+        MagicMock(return_value=Resources(8, 16 * GIB, 15 * GIB, 1)),
+    )
+    checks: list[Diagnostic] = diagnose(Systemd(), Paths(tmp_path / "state", tmp_path))
+    failed: Diagnostic = next(check for check in checks if check["check"] == "slice_enforcement")
+    assert not failed["ok"]
+    assert "no valid assigned control group" in str(failed["detail"])
+    assert "/sys/fs/cgroup/cpu.max" not in str(failed["detail"])
