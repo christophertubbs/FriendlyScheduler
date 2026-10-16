@@ -2,11 +2,19 @@ name: Release build
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing release tag to rebuild (for example v0.1.0)
+        required: true
+        type: string
 permissions:
   contents: read
 jobs:
   tests:
     uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ inputs.release_tag || github.event.release.tag_name }}
   build:
     needs: tests
     runs-on: ubuntu-24.04
@@ -16,14 +24,18 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
+          ref: ${{ inputs.release_tag || github.event.release.tag_name }}
       - name: Verify tag and build source, wheel and frozen executable
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.event.release.tag_name }}
         run: |
-          export PATH=/opt/python/cp311-cp311/bin:$PATH
-          python -c 'import os; from pathlib import Path; exec(Path("src/fsched/__init__.py").read_text()); assert os.environ["RELEASE_TAG"] == "v" + __version__, "release tag must match package version"'
-          python -m venv /tmp/build-venv
+          # manylinux's /opt/python interpreters are static wheel-build tools.
+          # Use its pinned uv tool to obtain a checksum-verified shared Python.
+          export UV_PYTHON_INSTALL_DIR=/tmp/fsched-python
+          uv python install 3.11.17
+          uv venv --seed --managed-python --python 3.11.17 /tmp/build-venv
           export PATH=/tmp/build-venv/bin:$PATH
+          python -c 'import os; from pathlib import Path; exec(Path("src/fsched/__init__.py").read_text()); assert os.environ["RELEASE_TAG"] == "v" + __version__, "release tag must match package version"'
           python -m pip install '.[dev]'
           scripts/build.sh
           mkdir -p bundle release
@@ -52,5 +64,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.event.release.tag_name }}
         run: gh release upload "$RELEASE_TAG" release/*

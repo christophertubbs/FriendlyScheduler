@@ -282,6 +282,24 @@ installer, README and GPL license. Releases also include wheel, sdist and SHA256
 Check checksums before installation; checksum integrity is not a substitute for
 trusting the release source. Other architectures are not built in this draft.
 
+The release image's `/opt/python` interpreters are static tools for building wheels;
+they cannot directly freeze this application. The workflow uses the pinned image's
+`uv` to download a checksum-verified **shared CPython 3.11.17**, creates a managed
+build venv, and freezes there while retaining glibc 2.28. `scripts/build.sh` checks
+that PyInstaller can find shared `libpython` before building any artifacts. These
+build paths and variables are configured by the workflow; no user-supplied secrets
+or custom environment variables are needed.
+
+To recover an already published release whose asset build failed, first merge the
+workflow fix into the default branch. In **Actions → Release build → Run workflow**,
+select the updated default branch and set `release_tag` to the existing exact tag,
+such as `v0.1.0`. The workflow tests and checks out that tag's source, validates its
+version, and attaches assets to the existing release. This avoids moving the tag or
+rebuilding different application source under the same version. Re-running the old
+failed run alone still uses its old workflow definition. Existing assets are not
+overwritten automatically. The release token is provided by GitHub; repository
+settings do not need to change.
+
 Normal tests require no systemd service and use temporary private state. Tests cover
 malformed options, literal argv, sharing monotonicity, tiny/nested cgroups, headroom,
 concurrent writers, cancellation, restart ambiguity, terminal results, unsafe paths,
